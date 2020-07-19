@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Provision a new k3s cluster on Vultr
+
+PLAN_ID=${PLAN_ID:-201}   # 1 CPU / 1GiB Mem
+REGION_ID=${REGION_ID:-4} # Seattle
+OS_ID=${OS_ID:-387}       # Ubuntu 20.04 x64
+SCRIPT_NAME=${SCRIPT_NAME:-install.sh}
+LABEL_NAME=${LABEL_NAME:-k3s-$(openssl rand -hex 4)}
+SSHKEY_ID=${SSHKEY_ID:-}
+
+PROVISION_SCRIPT=$(cat << EOF
+# Set the hostname
+hostnamectl set-hostname "$LABEL_NAME"
+
+# Install k3s
+curl -sfL https://get.k3s.io | sh -
+
+# Install Flux
+snap install fluxctl --classic
+fluxctl install \
+--git-user=stewartpark \
+--git-email=stewartpark@users.noreply.github.com \
+--git-url=git@github.com:stewartpark/stewpod \
+--git-path=namespaces,workloads \
+--namespace=default | kubectl apply -f -
+EOF
+)
+
+if [ -z "$SSHKEY_ID" ]; then
+    echo '[-] You need to specify a SSH key ID to provision a node.'
+    echo '    $ vultr-cli ssh create ...'
+    exit 1
+fi
+
+# Provision new machines
+echo "[+] Provisioning a new machine... ($LABEL_NAME)"
+SERVER_ID=$(vultr-cli server create -s "$SSHKEY_ID" -l "${LABEL_NAME}" -p "$PLAN_ID" -r "$REGION_ID" -o "$OS_ID" --script-id "$SCRIPT_ID" | awk '{print $NF}')
+while ! vultr-cli server list | grep active | grep "$SERVER_ID" > /dev/null; do sleep 1; done
+
+# Wait for the machine to boot completely
+sleep 40
+
+echo '[+] Running the install script...'
+SERVER_IP=$(vultr-cli server info "$SERVER_ID" | grep "Main IP" | awk '{print $NF}')
+echo "$PROVISION_SCRIPT" | ssh -o StrictHostKeyChecking=no -t "root@$SERVER_IP"
+
+echo '[*] Done'
+echo ''
+echo 'You can now connect to your new k3s node.'
+echo "  $ ssh root@$SERVER_IP"
