@@ -1,0 +1,66 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+  namespace: minecraft
+spec:
+  type: NodePort
+  selector:
+    app: minecraft
+  ports:
+    - port: 25565
+      targetPort: 25565
+      nodePort: 31111
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: minecraft
+  name: server
+  namespace: minecraft
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: minecraft
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: minecraft
+    spec:
+      containers:
+        - name: minecraft
+          image: itzg/minecraft-server:latest
+          env:
+            - name: EULA
+              value: "true"
+            - name: TYPE
+              value: 'SPIGOT'
+            - name: VERSION
+              value: '1.16.1'
+            - name: MEMORY
+              value: '1G'
+            - name: SERVER_NAME
+              value: 'Minecraft'
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 25565
+              hostPort: 25565
+              name: minecraft
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /data/
+              name: minecraft-data
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+      volumes:
+        - name: minecraft-data
+          hostPath:
+            path: /data/minecraft
