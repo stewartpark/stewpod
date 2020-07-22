@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 # Provision a new k3s cluster on Vultr
 
-PLAN_ID=${PLAN_ID:-201}   # 1 CPU / 1GiB Mem
+PLAN_ID=${PLAN_ID:-401}   # 1 CPU / 2GiB Mem High Freq
 REGION_ID=${REGION_ID:-4} # Seattle
 OS_ID=${OS_ID:-387}       # Ubuntu 20.04 x64
 SCRIPT_NAME=${SCRIPT_NAME:-install.sh}
 LABEL_NAME=${LABEL_NAME:-k3s-$(openssl rand -hex 4)}
 SSHKEY_ID=${SSHKEY_ID:-}
+GH_URL=${GIT_URL:-git@github.com:stewartpark/stewpod.git}
+GH_USER=${GIT_USER:-stewartpark}
+
+if [ -z "$SSHKEY_ID" ]; then
+    echo '[-] You need to specify a SSH key ID to provision a node.'
+    echo '    $ vultr-cli ssh create ...'
+    echo "    $ SSHKEY_ID=... $0"
+    exit 1
+fi
 
 PROVISION_SCRIPT=$(cat << EOF
 # Set the hostname
@@ -15,22 +24,29 @@ hostnamectl set-hostname "$LABEL_NAME"
 # Install k3s
 curl -sfL https://get.k3s.io | sh -
 
+# Add 1G swap
+fallocate -l 1G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
+sysctl -w vm.swappiness=10
+echo "vm.swappiness = 10" > /etc/sysctl.d/90-swappiness.conf
+
 # Install Flux
 snap install fluxctl --classic
+kubectl create ns flux
 fluxctl install \
---git-user=stewartpark \
---git-email=stewartpark@users.noreply.github.com \
---git-url=git@github.com:stewartpark/stewpod \
+--git-user=$GH_USER \
+--git-email=$GH_USER@users.noreply.github.com \
+--git-url=$GH_URL \
 --git-path=namespaces,workloads \
---namespace=default | kubectl apply -f -
+--namespace=flux | kubectl apply -f -
+
+sleep 120
+KUBECONFIG="~/.kube/config:/etc/rancher/k3s/k3s.yaml" fluxctl identity --k8s-fwd-ns=flux
 EOF
 )
-
-if [ -z "$SSHKEY_ID" ]; then
-    echo '[-] You need to specify a SSH key ID to provision a node.'
-    echo '    $ vultr-cli ssh create ...'
-    exit 1
-fi
 
 # Provision new machines
 echo "[+] Provisioning a new machine... ($LABEL_NAME)"
@@ -38,7 +54,7 @@ SERVER_ID=$(vultr-cli server create -s "$SSHKEY_ID" -l "${LABEL_NAME}" -p "$PLAN
 while ! vultr-cli server list | grep active | grep "$SERVER_ID" > /dev/null; do sleep 1; done
 
 # Wait for the machine to boot completely
-sleep 40
+sleep 120
 
 echo '[+] Running the install script...'
 SERVER_IP=$(vultr-cli server info "$SERVER_ID" | grep "Main IP" | awk '{print $NF}')
