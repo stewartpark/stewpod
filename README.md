@@ -1,4 +1,4 @@
-<img src="https://github.com/stewartpark/stewpod/raw/master/misc/stewpod.jpg" alt="Stewpod" />
+<p align="center"><img src="https://github.com/stewartpark/stewpod/raw/master/misc/stewpod.jpg" alt="Stewpod" /></p>
 
 stewpod is a single-node Kubernetes cluster deployment(k3s) where Stewart and his friends put their toys.
 
